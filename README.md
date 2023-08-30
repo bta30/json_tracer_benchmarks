@@ -1,6 +1,9 @@
 # JSON Tracer Benchmarks
 Executes benchmarks for the JSON Tracer
 
+## Dependencies
+This requires and AMD64 machine running Linux with core utils, g++, git, cmake, make and m4.
+
 ## How to use
 First, clone this repository, recursively cloning submodules:
 ```
