@@ -1,7 +1,21 @@
 #!/bin/bash
 
-logDir="/local/scratch"
+cd $(dirname $0)
 
+splash3Path="benchmark_programs/Splash-3/codes"
+fmmPath="$splash3Path/apps/fmm"
+oceanContiguousPath="$splash3Path/apps/ocean/contiguous_partitions"
+barnesPath="$splash3Path/apps/barnes"
+radixPath="$splash3Path/kernels/radix"
+
+# Given: Module Path
+# Returns: Options to tracer for module
+function getTracerOpts {
+    echo "--exclude --instr --all --include --instr mov --exclude --module -N$1"
+}
+
+# Given: command stdinfile
+# Output: time (in ms)
 function timeCommand {
     start=$(($(date +%s%N)/1000000))
     $1 <"$2" >/dev/null
@@ -9,94 +23,124 @@ function timeCommand {
     echo "$((end - start))"
 }
 
-# Given: executable arguments stdinfile name
+# Given: executable arguments traceropts stdinfile name particles threads
+# Output: name,time,size,"eraserlockset"
 function timeBenchmark {
     rm -f *.log
 
-    echo -e "Benchmark $4:"
-
-    outputPrefix="$4"
-
-    timeNormal=$(timeCommand "$1 $2" $3)
-    echo "Normal time: $timeNormal ms"
-
-    timeExcludeAll=$(timeCommand "./json_tracer/run.sh --output_interleaved --output_prefix $outputPrefix --exclude --module --all -- $1 $2" $3)  
-    excludeAllFactor=$(echo "scale=3; $timeExcludeAll/$timeNormal" | bc -l)
-    excludeAllTraceName="$outputPrefix.0000.log"
-    excludeAllTraceSize=$(du -sm $excludeAllTraceName | awk '{print $1}')
-    excludeAllWriteSpeed=$(echo "scale=3; $excludeAllTraceSize/($timeExcludeAll/1000)" | bc -l)
-    echo "Time exclude all: $timeExcludeAll ms, $excludeAllFactor times slower than normal, writing at speed $excludeAllWriteSpeed MB/s"
-
-    timeIncludeMainModule=$(timeCommand "./json_tracer/run.sh --output_interleaved --output_prefix $outputPrefix --exclude --module --all --include --module $1 --exclude --instr -Ncall -- $1 $2" $3)
-    includeMainModuleFactor=$(echo "scale=3; $timeIncludeMainModule/$timeNormal" | bc -l)
-    includeMainModuleTraceName="$outputPrefix.0001.log"
-    includeMainModuleTraceSize=$(du -sm $includeMainModuleTraceName | awk '{print $1}')
-    includeMainModuleWriteSpeed=$(echo "scale=3; $includeMainModuleTraceSize/($timeIncludeMainModule/1000)" | bc -l)
-    echo "Time include only main module (only call instructions) : $timeIncludeMainModule ms, $includeMainModuleFactor times slower than normal, writing at speed $includeMainModuleWriteSpeed MB/s"
-
-    timeIncludeAll=$(timeCommand "./json_tracer/run.sh --output_interleaved --output_prefix $outputPrefix --exclude --instr -Ncall -- $1 $2" $3)
-    includeAllFactor=$(echo "scale=3; $timeIncludeAll/$timeNormal" | bc -l)
-    includeAllTraceName="$outputPrefix.0002.log"
-    includeAllTraceSize=$(du -sm $includeAllTraceName | awk '{print $1}')
-    includeAllWriteSpeed=$(echo "scale=3; $includeAllTraceSize/($timeIncludeAll/1000)" | bc -l)
-    echo "Time include all modules (only call instructions): $timeIncludeAll ms, $includeAllFactor times slower than normal, writing at speed $includeAllWriteSpeed MB/s"
-
-    echo ""
+    outputPrefix="$5"
+    time=$(timeCommand "./json_tracer/run.sh --output_interleaved --output_prefix $outputPrefix $3 -- $1 $2" $4)
+    traceName=$outputPrefix.0000.log
+    size=$(du -sm $traceName | awk '{print $1}')
+    echo "$5,$6,$7,$time,$size"
 }
 
-function doSumBenchmarks {
-    timeBenchmark "json_tracer/bin/sum" "2 json_tracer/test/sum/tables/*" "/dev/null" "sum"
+function benchmarkFMM {
+    numParticles=(
+        256
+        2048
+        16384
+    )
+
+    for i in "${numParticles[@]}"; do
+        tracerOpts="$(getTracerOpts "$fmmPath/FMM")"
+        timeBenchmark "$fmmPath/FMM" "" "$tracerOpts" "$fmmPath/inputs/input.1.$i" "FMM_1_$i" $i 1
+    done
 }
 
-function doSplash3Benchmarks {
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/barnes/BARNES" "" "benchmark_programs/Splash-3/codes/apps/barnes/inputs/n16384-p1" "Splash-3_Barnes_1"
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/barnes/BARNES" "" "benchmark_programs/Splash-3/codes/apps/barnes/inputs/n16384-p16" "Splash-3_Barnes_16"
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/barnes/BARNES" "" "benchmark_programs/Splash-3/codes/apps/barnes/inputs/n16384-p256" "Splash-3_Barnes_256"
+function benchmarkOceanContiguous {
+    numParticles=(
+        10
+        18
+        34
+        66
+        130
+        258
+        514
+        1026
+        2050
+        4098
+    )
 
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/fmm/FMM" "" "benchmark_programs/Splash-3/codes/apps/fmm/inputs/input.1.16384" "Splash-3_FMM_1_16384"
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/fmm/FMM" "" "benchmark_programs/Splash-3/codes/apps/fmm/inputs/input.2.16384" "Splash-3_FMM_2_16384"
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/fmm/FMM" "" "benchmark_programs/Splash-3/codes/apps/fmm/inputs/input.64.16384" "Splash-3_FMM_64_16384"
+    numThreads=(
+        1
+        2
+        4
+        8
+        16
+    )
 
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/ocean/contiguous_partitions/OCEAN" "-p1 -n258" "/dev/null" "Splash-3_Ocean_1"
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/ocean/contiguous_partitions/OCEAN" "-p4 -n258" "/dev/null" "Splash-4_Ocean_1"
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/ocean/contiguous_partitions/OCEAN" "-p64 -n258" "/dev/null" "Splash-64_Ocean_1"
-
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/radiosity/RADIOSITY" "-p 1 -ae 5000 -bf 0.1 -en 0.05 -room -batch" "/dev/null" "Splash-64_Radiosity_1"
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/radiosity/RADIOSITY" "-p 4 -ae 5000 -bf 0.1 -en 0.05 -room -batch" "/dev/null" "Splash-64_Radiosity_4"
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/radiosity/RADIOSITY" "-p 64 -ae 5000 -bf 0.1 -en 0.05 -room -batch" "/dev/null" "Splash-64_Radiosity_64"
-
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/raytrace/RAYTRACE" "-p1 -m64 benchmark_programs/Splash-3/codes/apps/raytrace/inputs/car.env" "/dev/null" "Splash-64_Raytrace_1"
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/raytrace/RAYTRACE" "-p4 -m64 benchmark_programs/Splash-3/codes/apps/raytrace/inputs/car.env" "/dev/null" "Splash-64_Raytrace_4"
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/raytrace/RAYTRACE" "-p64 -m64 benchmark_programs/Splash-3/codes/apps/raytrace/inputs/car.env" "/dev/null" "Splash-64_Raytrace_64"
-
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/volrend/VOLREND" "1 benchmark_programs/Splash-3/codes/apps/volrend/inputs/head 8" "/dev/null" "Splash-3_Volrend_1"
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/volrend/VOLREND" "4 benchmark_programs/Splash-3/codes/apps/volrend/inputs/head 8" "/dev/null" "Splash-3_Volrend_4"
-    timeBenchmark "benchmark_programs/Splash-3/codes/apps/volrend/VOLREND" "64 benchmark_programs/Splash-3/codes/apps/volrend/inputs/head 8" "/dev/null" "Splash-3_Volrend_64"
-
-    timeBenchmark "benchmark_programs/Splash-3/codes/kernels/cholesky/CHOLESKY" "-p1" "benchmark_programs/Splash-3/codes/kernels/cholesky/inputs/tk15.O" "Splash-3_Cholesky_1"
-    timeBenchmark "benchmark_programs/Splash-3/codes/kernels/cholesky/CHOLESKY" "-p4" "benchmark_programs/Splash-3/codes/kernels/cholesky/inputs/tk15.O" "Splash-3_Cholesky_4"
-    timeBenchmark "benchmark_programs/Splash-3/codes/kernels/cholesky/CHOLESKY" "-p64" "benchmark_programs/Splash-3/codes/kernels/cholesky/inputs/tk15.O" "Splash-3_Cholesky_64"
-
-    timeBenchmark "benchmark_programs/Splash-3/codes/kernels/fft/FFT" "-p1 -m16" "/dev/null" "Splash-3_FFT_1"
-    timeBenchmark "benchmark_programs/Splash-3/codes/kernels/fft/FFT" "-p4 -m16" "/dev/null" "Splash-3_FFT_4"
-    timeBenchmark "benchmark_programs/Splash-3/codes/kernels/fft/FFT" "-p64 -m16" "/dev/null" "Splash-3_FFT_64"
-
-    timeBenchmark "benchmark_programs/Splash-3/codes/kernels/lu/contiguous_blocks/LU" "-p1 -n512" "/dev/null" "Splash-3_LU_1"
-    timeBenchmark "benchmark_programs/Splash-3/codes/kernels/lu/contiguous_blocks/LU" "-p4 -n512" "/dev/null" "Splash-3_LU_4"
-    timeBenchmark "benchmark_programs/Splash-3/codes/kernels/lu/contiguous_blocks/LU" "-p64 -n512" "/dev/null" "Splash-3_LU_64"
-
-    timeBenchmark "benchmark_programs/Splash-3/codes/kernels/radix/RADIX" "-p1 -n1048576" "/dev/null" "Splash-3_Radix_1"
-    timeBenchmark "benchmark_programs/Splash-3/codes/kernels/radix/RADIX" "-p4 -n1048576" "/dev/null" "Splash-3_Radix_4"
-    timeBenchmark "benchmark_programs/Splash-3/codes/kernels/radix/RADIX" "-p64 -n1048576" "/dev/null" "Splash-3_Radix_64"
+    for i in "${numParticles[@]}"; do
+        for j in "${numThreads[@]}"; do
+            tracerOpts="$(getTracerOpts "$oceanContiguousPath/OCEAN")"
+            timeBenchmark "$oceanContiguousPath/OCEAN" "-p$j -n$i" "$tracerOpts" "/dev/null" "OCEAN_CONTIGUOUS" $i $j 
+        done
+    done
 }
 
-function doBenchmarks {
-    doSumBenchmarks
-    doSplash3Benchmarks
+function benchmarkRadix {
+    numKeys=(
+        1000
+        2000
+        4000
+        8000
+        16000
+        32000
+        64000
+        128000
+        256000
+        512000
+        1024000
+        2048000
+        4096000
+        8192000
+        16384000
+    )
+    
+    numThreads=(
+        1
+        2
+        4
+        8
+        16
+    )
+
+    for i in "${numKeys[@]}"; do
+        for j in "${numThreads[@]}"; do
+            tracerOpts="$(getTracerOpts "$radixPath/RADIX")"
+            timeBenchmark "$radixPath/RADIX" "-p$j -n$i" "$tracerOpts" "/dev/null" "RADIX" $i $j
+        done
+    done
 }
 
-if [ -f built ]; then
-    doBenchmarks
-else
-    echo "Error: It appears ./build.sh has not been run yet"
-fi
+function benchmarkBarnes {
+    numParticles=(
+        1024
+        2048
+        4096
+        8192
+        16384
+    )
+
+    numThreads=(
+        1
+        2
+        4
+        8
+        16
+    )
+
+    for i in "${numParticles[@]}"; do
+        for j in "${numThreads[@]}"; do
+            tracerOpts="$(getTracerOpts "$barnesPath/BARNES")"
+            timeBenchmark "$barnesPath/BARNES" "" "$tracerOpts" "$barnesPath/inputs_new/n$i-p$j" "BARNES" $i $j
+        done
+    done
+}
+
+for i in {1..5}; do
+    benchmarkBarnes
+    benchmarkOceanContiguous
+    benchmarkFMM
+    benchmarkRadix
+done
