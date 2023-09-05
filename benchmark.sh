@@ -24,24 +24,26 @@ function timeCommand {
 }
 
 # Given: executable arguments traceropts stdinfile name particles threads
-# Output: name,time,size,"eraserlockset"
+# Output: name,time,size,lines,filtertype
 function timeBenchmark {
     outputPrefix="$5"
     traceName=$outputPrefix.0000.log
 
     rm -f *.log
     time=$(timeCommand "$1 $2" $4)
-    echo "$5,$6,$7,$time,0,normal"
+    echo "$5,$6,$7,$time,0,0,normal"
 
     rm -f *.log
     time=$(timeCommand "./json_tracer/run.sh --output_interleaved --output_prefix $outputPrefix --exclude --module --all -- $1 $2" $4)
     size=$(du -sm $traceName | awk '{print $1}')
-    echo "$5,$6,$7,$time,$size,filter_all"
+    lines=$(wc -l $traceName | awk '{print $1}')
+    echo "$5,$6,$7,$time,$size,$lines,filter_all"
 
     rm -f *.log
     time=$(timeCommand "./json_tracer/run.sh --output_interleaved --output_prefix $outputPrefix $3 -- $1 $2" $4)
     size=$(du -sm $traceName | awk '{print $1}')
-    echo "$5,$6,$7,$time,$size,filter_some"
+    lines=$(wc -l $traceName | awk '{print $1}')
+    echo "$5,$6,$7,$time,$size,$lines,filter_some"
 }
 
 function benchmarkFMM {
@@ -148,8 +150,8 @@ function benchmarkBarnes {
 }
 
 for i in {1..5}; do
-    #benchmarkBarnes
     benchmarkOceanContiguous
-    #benchmarkFMM
-    #benchmarkRadix
+    benchmarkFMM
+    benchmarkRadix
+    benchmarkBarnes
 done
