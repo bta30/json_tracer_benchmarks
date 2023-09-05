@@ -26,13 +26,22 @@ function timeCommand {
 # Given: executable arguments traceropts stdinfile name particles threads
 # Output: name,time,size,"eraserlockset"
 function timeBenchmark {
-    rm -f *.log
-
     outputPrefix="$5"
-    time=$(timeCommand "./json_tracer/run.sh --output_interleaved --output_prefix $outputPrefix $3 -- $1 $2" $4)
     traceName=$outputPrefix.0000.log
+
+    rm -f *.log
+    time=$(timeCommand "$1 $2" $4)
+    echo "$5,$6,$7,$time,0,normal"
+
+    rm -f *.log
+    time=$(timeCommand "./json_tracer/run.sh --output_interleaved --output_prefix $outputPrefix --exclude --module --all -- $1 $2" $4)
     size=$(du -sm $traceName | awk '{print $1}')
-    echo "$5,$6,$7,$time,$size"
+    echo "$5,$6,$7,$time,$size,filter_all"
+
+    rm -f *.log
+    time=$(timeCommand "./json_tracer/run.sh --output_interleaved --output_prefix $outputPrefix $3 -- $1 $2" $4)
+    size=$(du -sm $traceName | awk '{print $1}')
+    echo "$5,$6,$7,$time,$size,filter_some"
 }
 
 function benchmarkFMM {
@@ -139,8 +148,8 @@ function benchmarkBarnes {
 }
 
 for i in {1..5}; do
-    benchmarkBarnes
+    #benchmarkBarnes
     benchmarkOceanContiguous
-    benchmarkFMM
-    benchmarkRadix
+    #benchmarkFMM
+    #benchmarkRadix
 done
